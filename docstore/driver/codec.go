@@ -34,7 +34,16 @@ var (
 	textMarshalerType     = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
 	textUnmarshalerType   = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 	protoMessageType      = reflect.TypeOf((*proto.Message)(nil)).Elem()
+	customMarshalerType   = reflect.TypeOf((*CustomMarshaler)(nil)).Elem()
+	customUnmarshalerType = reflect.TypeOf((*CustomUnmarshaler)(nil)).Elem()
 )
+
+type CustomMarshaler interface {
+	CustomMarshal(enc Encoder) error
+}
+type CustomUnmarshaler interface {
+	CustomUnmarshal(dec Decoder) bool
+}
 
 // An Encoder encodes Go values in some other form (e.g. JSON, protocol buffers).
 // The encoding protocol is designed to avoid losing type information by passing
@@ -123,6 +132,9 @@ func encode(v reflect.Value, enc Encoder) error {
 	done, err := enc.EncodeSpecial(v)
 	if done {
 		return err
+	}
+	if v.Type().Implements(customMarshalerType) {
+		return v.Interface().(CustomMarshaler).CustomMarshal(enc)
 	}
 	if v.Type().Implements(binaryMarshalerType) {
 		bytes, err := v.Interface().(encoding.BinaryMarshaler).MarshalBinary()
@@ -404,6 +416,12 @@ func decode(v reflect.Value, d Decoder) error {
 	}
 
 	// Handle implemented interfaces first.
+	if reflect.PtrTo(v.Type()).Implements(customUnmarshalerType) {
+		if v.Addr().Interface().(CustomUnmarshaler).CustomUnmarshal(d) {
+			return nil
+		}
+		return decodingError(v, d)
+	}
 	if reflect.PtrTo(v.Type()).Implements(binaryUnmarshalerType) {
 		if b, ok := d.AsBytes(); ok {
 			return v.Addr().Interface().(encoding.BinaryUnmarshaler).UnmarshalBinary(b)
